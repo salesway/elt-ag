@@ -1,0 +1,22 @@
+{
+    "compilerOptions": {
+        "target": "ES2019",
+        "module": "es2015",
+        "moduleResolution": "node",
+        "declaration": true,
+        "sourceMap": true,
+        "strict": true,
+        "noUnusedLocals": true,
+        "jsxFragmentFactory": "e.Fragment",
+        "outDir": "./lib",
+        "rootDir": "./src",
+        "jsx": "react",
+        "baseUrl": "./src",
+        "jsxFactory": "e",
+        "experimentalDecorators": true,
+        "lib": ["dom", "es2020"],
+        "types": []
+    },
+    "include": ["./src"],
+    "exclude": ["./lib/**/*"]
+}

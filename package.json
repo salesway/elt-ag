@@ -1,0 +1,35 @@
+{
+  "name": "@salesway/elt-ag",
+  "version": "0.0.1",
+  "repository": "https://github.com/elementjs/elt-ag",
+  "description": "An ag-grid wrapper designed to run with elt",
+  "license": "MIT",
+  "engines": {
+    "node": ">=14.0.0"
+  },
+  "main": "./lib/index.js",
+  "typings": "./lib/index.d.ts",
+  "types": "./lib/index.d.ts",
+  "type": "module",
+  "files": [
+    "./lib"
+  ],
+  "scripts": {
+    "build:js": "tsc | wtsc",
+    "build": "npm run build:js",
+    "prepublish": "npm run build",
+    "watch": "tsc -w --preserveWatchOutput | wtsc npm run build"
+  },
+  "devDependencies": {
+    "@types/js-yaml": "^4.0.5",
+    "esbuild": "^0.15.7",
+    "js-yaml": "^4.1.0",
+    "typescript": "^5.3.3",
+    "wtsc": "^0.1.x"
+  },
+  "peerDependencies": {
+    "@salesway/pgts": "^0.x.x",
+    "ag-grid-enterprise": "^31.x.x"
+  },
+  "dependencies": {}
+}
