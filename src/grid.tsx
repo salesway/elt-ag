@@ -1,164 +1,41 @@
-import { createGrid, GridOptions, ColDef, GridApi, ICellRendererParams, ICellRendererComp, ICellEditorComp } from "ag-grid-enterprise"
+import { createGrid, GridOptions, GridApi, IRowNode, } from "ag-grid-enterprise"
 
-import { Inserter, node_on_connected, node_on_disconnected, o, sym_insert, e, node_do_disconnect, Renderable, node_do_connected } from "elt"
+import { Inserter, node_on_connected, node_on_disconnected, o, sym_insert, e, } from "elt"
 
 import "./grid-style"
 
-import { AgPromise, ICellEditorParams } from "ag-grid-community"
-
 import { ModelSource } from "./server"
 import { Model } from "@salesway/pgts"
+import { ColumnMapping } from "./column-mapping"
 
 
-export type SelectValues<T> = T[] | Promise<T[]> | (() => T[] | Promise<T[]>)
+export const sym_status = Symbol("modified")
+export const enum RowStatus {
+  None = 0,
+  Added = 1,
+  Modified = 2,
+  Deleted = 3,
+  Error = 4,
+}
 
-
-export class EltCellEditor<T, K extends keyof T, Context = any> implements ICellEditorComp {
-  gui!: HTMLElement
-
-  init(params: ICellEditorParams<any, any, any>): void | AgPromise<void> {
-
-  }
-
-  focusIn(): void {
-
-  }
-
-  focusOut(): void {
-
-  }
-
-  getValue() {
-
-  }
-
-  getGui(): HTMLElement {
-    return this.gui
-  }
-
-  destroy(): void {
-    node_do_disconnect(this.gui)
-    this.gui = null!
-  }
-
-  afterGuiAttached(): void {
-    node_do_connected(this.gui)
+declare module "ag-grid-enterprise" {
+  interface IRowNode<TData = any> {
+    [sym_status]?: RowStatus
+    error?: string
   }
 }
 
-export function make_renderer<T, K extends keyof T, Context = any>(render: (params: ICellRendererParams<T, T[K], Context>) => Renderable) {
-
-  return class EltCellRenderer implements ICellRendererComp {
-    static renderFn = render
-    gui!: HTMLElement
-
-    init(params: ICellRendererParams<any, any, any>): void | AgPromise<void> {
-      let gui: Renderable = render(params)
-      if (!(gui instanceof Node)) {
-        gui = <div>{gui}</div> as HTMLElement
-      }
-      this.gui = gui as HTMLElement
-    }
-
-    destroy(): void {
-      node_do_disconnect(this.gui)
-      this.gui = null!
-    }
-
-    getGui(): HTMLElement {
-      // We timeout it because this is the only way we'll be sure they're actually connected, since ag-grid does not give us control of when it gets inserted for real.
-      setTimeout(() => { if (this.gui) { node_do_connected(this.gui as Node); } })
-      return this.gui
-    }
-
-    refresh(params: ICellRendererParams<any, any, any>): boolean {
-      return false // We could do some observable stuff...
-    }
-  }
-}
-
-
-/**
- *
- */
-export class ColumnMapping<T, K extends keyof T, Context = any> {
-
-  constructor(public key: K) { }
-
-  render(fn: (ctx: ICellRendererParams<T, T[K], Context>) => Renderable) {
-    const rd = make_renderer(fn)
-
-    this.options({
-      cellRenderer: rd,
-      cellEditorParams: {
-        cellRenderer: rd,
-      },
-      filterParams: {
-        cellRenderer: rd,
-      }
-    })
-    return this
-  }
-
-  select(values: SelectValues<T[K]>) {
-    this.options({
-      cellEditor: "agRichSelectCellEditor",
-      cellEditorParams: {
-        values,
-        searchType: 'fuzzy',
-        allowTyping: true,
-        filterList: true,
-        highlightMatch: true,
-      },
-    })
-    return this
-  }
-
-  name(t: string) {
-    this._options.headerName = t
-    return this
-  }
-
-  get center() {
-    this.options({
-      cellStyle: {
-        display: "flex",
-        justifyContent: "center",
-      },
-    })
-    return this
-  }
-
-  get checkbox() {
-    this.options({
-      cellRenderer: 'agCheckboxCellRenderer',
-      cellEditor: 'agCheckboxCellEditor',
-    })
-    return this
-  }
-
-  _options: ColDef<T> = {
-    field: this.key as any,
-    menuTabs: ['filterMenuTab'],
-    editable: true,
-    filter: true,
-    enablePivot: true,
-    enableValue: true,
-    sortable: true,
-  }
-
-  options(opts: ColDef<T>) {
-    this._options = o.assign(this._options as any, opts)
-    return this
-  }
-
-}
 
 
 export class AGWrapper<T, Context = any> implements Inserter<HTMLElement> {
 
-  static from<T>(typ: new () => T, lst?: T[] | o.Observable<T[]>, opts?: GridOptions<T>): AGWrapper<T> {
-    const n = new AGWrapper<T>()
+  static from<T>(
+    typ: new () => T,
+    id_fn: (item: T) => any,
+    lst?: T[] | o.Observable<T[]>,
+    opts?: GridOptions<T>
+  ): AGWrapper<T> {
+    const n = new AGWrapper<T>(id_fn)
     if (opts != null) { n.options(opts) }
     if (lst) n.data = o.get(lst)
     n.model = typ
@@ -168,11 +45,39 @@ export class AGWrapper<T, Context = any> implements Inserter<HTMLElement> {
   node: HTMLDivElement = <div style={{width: "100%", height: "100%",}} class={["ag-theme-balham", "ag-theme-sw"]}/> as HTMLDivElement
   table!: GridApi
   model!: new () => T
-  data: T[] = []
 
-  constructor() {
+  _data: T[] | null = null
+  get data(): T[] {
+    const res: T[] = []
+    this.table.forEachLeafNode(node => {
+      res.push(node.data)
+    })
+    return res
+  }
+  set data(dt: T[]) {
+    if (!this.table) {
+      this._data = dt
+    } else {
+      this.table.updateGridOptions({
+        rowData: dt,
+      })
+    }
+  }
+
+  modified_tmp = new Map<any, T>()
+  deleted_tmp = new Map<any, T>()
+
+  /**  */
+  saveChanges() {
+
+  }
+
+  constructor(
+    public id_fn: (val: T) => any
+  ) {
     node_on_connected(this.node, this.on_connected)
     node_on_disconnected(this.node, this.on_disconnected)
+    this._options.getRowId = param => id_fn(param.data)
   }
 
   _cols: ColumnMapping<T, any>[] = []
@@ -181,18 +86,24 @@ export class AGWrapper<T, Context = any> implements Inserter<HTMLElement> {
       type: 'fitCellContents',
     },
 
+    columnHoverHighlight: false,
+    suppressRowHoverHighlight: true,
+
     defaultColDef: {
-      editable: true,
+
+    },
+
+    getRowStyle(par) {
+      if (par.node[sym_status] === RowStatus.Modified) {
+        return {background: "rgba(255, 165, 0, 0.25)"}
+      } else if (par.node[sym_status] === RowStatus.Error) {
+        return {background: "rgba(255, 0, 0, 0.25)"}
+      }
     },
 
     enterNavigatesVerticallyAfterEdit: true,
 
-    // rowSelection: "single",
     enableRangeSelection: true,
-    undoRedoCellEditing: true,
-    undoRedoCellEditingLimit: 50,
-    // columns: this._columns,
-    // licenseKey: "non-commercial-and-evaluation",
   }
 
   setQuickFilter(fil: string | undefined) {
@@ -200,7 +111,7 @@ export class AGWrapper<T, Context = any> implements Inserter<HTMLElement> {
   }
 
   col<K extends keyof T>(key: K, fn?: (cm: ColumnMapping<T, K, Context>) => any) {
-    const c = new ColumnMapping<T, K>(key)
+    const c = new ColumnMapping<T, K>(this, key)
     fn?.(c)
     this._cols.push(c)
     return this
@@ -211,14 +122,62 @@ export class AGWrapper<T, Context = any> implements Inserter<HTMLElement> {
     return this
   }
 
+  getTopPinnedObjects(): T[] {
+    const nb_top = this.table.getPinnedTopRowCount()
+    const top: T[] = []
+    for (let i = 0; i < nb_top; i++) {
+      top.push(this.table.getPinnedTopRow(i)?.data)
+    }
+    return top
+  }
+
+  /**
+   * Pour tous les objets Pinnés (en haut ou en bas,) on considère qu'il s'agit d'une tentative d'insertion, donc on tente de les "insérer," sachant qu'on va fail un objet pour lequel on avait par exemple déjà un row.
+   * Cela aboutit toujours à une transaction, sachant que l'on garde des changements locaux
+   */
+  async savePrimedChanges() {
+    let nodes_to_save: IRowNode<any>[] = []
+    let nodes_to_add: T[] = []
+
+    this.table.forEachLeafNode(node => {
+      if (node[sym_status]) {
+        nodes_to_save.push(node)
+      }
+    })
+
+    const row_id_fn = this.table.getGridOption("getRowId")!
+
+    // this.table.getRowNode()
+
+    // We should have a callback that does some validation, sets errors and replies with a batch update
+
+    console.log(nodes_to_save)
+
+    // ... after while
+    for (let n of nodes_to_save) {
+      n[sym_status] = RowStatus.None
+    }
+
+    await this.table.applyTransactionAsync({
+
+    })
+
+    this.table.redrawRows({
+      rowNodes: nodes_to_save
+    })
+  }
+
   on_connected = () => {
     this.table = createGrid(this.node, {
       ...this._options,
       columnDefs: this._cols.map(c => c._options),
     })
 
-    if (this.data) {
-      this.table.setGridOption("rowData", this.data)
+    // this.table.addEventListener("cellEdi")
+
+    if (this._data) {
+      this.table.setGridOption("rowData", this._data)
+      this._data = null
     }
   }
 

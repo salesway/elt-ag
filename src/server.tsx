@@ -1,11 +1,8 @@
-import { AdvancedFilterModel, BooleanAdvancedFilterModelType, FilterModel, IServerSideDatasource, IServerSideGetRowsParams, IViewportDatasource, IViewportDatasourceParams, ScalarAdvancedFilterModelType, TextAdvancedFilterModelType } from "ag-grid-enterprise"
+import { AdvancedFilterModel, BooleanAdvancedFilterModelType, FilterModel, IServerSideDatasource, IServerSideGetRowsParams, IViewportDatasourceParams, ScalarAdvancedFilterModelType, TextAdvancedFilterModelType } from "ag-grid-enterprise"
 import { Model, s } from "@salesway/pgts"
 
-function is_advanced(s: any): s is AdvancedFilterModel {
-  return true
-}
 
-const adv_number: {[name in ScalarAdvancedFilterModelType | TextAdvancedFilterModelType | BooleanAdvancedFilterModelType]: (value?: any) => string} = {
+const filters: {[name in ScalarAdvancedFilterModelType | TextAdvancedFilterModelType | BooleanAdvancedFilterModelType]: (value?: any) => string} = {
   lessThan: v => `lt.${v}`,
   lessThanOrEqual: v => `lte.${v}`,
   greaterThanOrEqual: v => `gte.${v}`,
@@ -15,8 +12,8 @@ const adv_number: {[name in ScalarAdvancedFilterModelType | TextAdvancedFilterMo
   true: v => "is.true",
   false: v => "is.false",
   // ??
-  contains: v => `contains.${v}`,
-  notContains: v => `not.contains.${v}`,
+  contains: v => `match.${v}`,
+  notContains: v => `not.match.${v}`,
   endsWith: v => ``,
   startsWith: v => ``,
   equals: v => `eq.${v}`,
@@ -51,16 +48,15 @@ export class ModelSource implements IServerSideDatasource {
 
       if (r.filterModel) {
         const ft = r.filterModel
-        const fts: string[] = []
-        const do_filter = (ft: FilterModel | AdvancedFilterModel) => {
-          if (is_advanced(ft)) {
-            if (ft.filterType === "number") {
-              adv_number[ft.type]
-            }
+        if (params.api.getGridOption("advancedFilterModel")) {
+          const _ = ft as AdvancedFilterModel
+        } else {
+          const _ = ft as FilterModel
+          for (let [key, val] of Object.entries(_)) {
+            console.log(key, val)
+            parts.push(`${key}=${filters[val.type as keyof typeof filters](val.filter)}`)
           }
         }
-
-        ft.type
       }
 
       if (r.startRow != null && r.endRow != null) {
@@ -93,6 +89,7 @@ export class ModelSource implements IServerSideDatasource {
       params.success({
         rowData: res,
         rowCount: parseInt(count_str),
+
       })
     } catch (e) {
       params.fail()
