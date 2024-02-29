@@ -50,9 +50,13 @@ export class ColumnMapping<T, K extends keyof T, Context = any> {
     return this
   }
 
-  select(values: SelectValues<T, T[K], Context>, opts?: {
+  select(values?: SelectValues<T, T[K], Context>, opts?: {
     allowUserText?: boolean,
   }) {
+    values ??= (params) => {
+      return [...new Set(this.wrapper.data.map((item: any) => item[params.colDef.field as any]))]
+    }
+
     this.options({
       cellEditor: RichSelectAllowText,
       cellEditorParams: {
@@ -108,11 +112,13 @@ export class ColumnMapping<T, K extends keyof T, Context = any> {
           param.data as any,
           {[param.colDef.field!]: param.newValue}
         ) as T
-        param.node[sym_status] = 1
-        param.node.setData(dt)
+
+        const node = param.node
+        node[sym_status] = 1
+        node.setData(dt)
 
         const id = this.wrapper.id_fn(dt)
-        if (param.node.id !== id) {
+        if (node.id !== id) {
           // param.node.Id
         }
         // Il faut probablement faire un SetId !
