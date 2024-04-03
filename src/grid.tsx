@@ -1,4 +1,4 @@
-import { createGrid, GridOptions, GridApi, IRowNode, } from "ag-grid-enterprise"
+import { createGrid, GridOptions, GridApi, IRowNode, CellRangeType,  } from "ag-grid-enterprise"
 
 import { Inserter, node_on_connected, node_on_disconnected, o, sym_insert, e, } from "elt"
 
@@ -179,8 +179,26 @@ export class AGWrapper<T, Context = any> implements Inserter<HTMLElement> {
         this.table.edits.undo()
       } else if (ev.ctrlKey && ev.code === "KeyY") {
         this.table.edits.redo()
+      } else if (ev.ctrlKey && ev.code === "KeyA") {
+        const grid = this.table
+        const cols = grid.getColumns()!.slice(1)
+
+        grid.clearRangeSelection()
+
+        grid.setFocusedCell( 0, cols[0], );
+        grid.addCellRange({
+          rowStartIndex: 0,
+          columns: cols,
+          rowEndIndex: grid.getDisplayedRowCount()
+        })
+
+        // this.table.
+      } else {
+        return
       }
-    })
+      ev.preventDefault()
+      ev.stopPropagation()
+    }, { capture: true })
     parent.insertBefore(this.node, ref)
   }
 

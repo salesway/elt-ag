@@ -137,6 +137,28 @@ export class GridEdits<T = any> {
         width: 20,
         floatingFilter: false,
         suppressHeaderMenuButton: true,
+
+        contextMenuItems: par => {
+          return [
+            {
+              icon: <I.FaArrowRotateRight>
+                {$tooltip(() => "Yup.")}
+              </I.FaArrowRotateRight> as Element,
+              name: "Rafraîchir",
+              tooltip: "Rafraîchit la valeur depuis le serveur",
+            },
+            {
+              icon: <I.FaTrash/> as Element,
+              name: "Supprimer",
+              tooltip: "Marque le row à supprimer",
+              action: () => {
+
+              }
+            }
+          ]
+        },
+
+        /** Render des indicateurs d'erreur / modification / suppression */
         cellRenderer: make_renderer(par => {
           const st = this.current_status.get(par.node.id ?? par.node as any)
           let display = <span></span> as HTMLElement
@@ -230,7 +252,6 @@ export class GridEdits<T = any> {
     }
     this.grid.redrawRows({rowNodes: nodes})
     this.wrapper.node.focus()
-
     this.refocus()
   }
 

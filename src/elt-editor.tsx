@@ -1,5 +1,4 @@
-import { AgPromise } from "ag-grid-community"
-import { ICellEditorComp, ICellEditorParams, } from "ag-grid-enterprise"
+import { AgPromise, ICellEditorComp, ICellEditorParams, } from "ag-grid-enterprise"
 import { node_do_connected, node_do_disconnect } from "elt"
 
 

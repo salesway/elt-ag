@@ -1,5 +1,4 @@
-import { AgPromise } from "ag-grid-community"
-import { ICellRendererComp, ICellRendererParams } from "ag-grid-enterprise"
+import { AgPromise, ICellRendererComp, ICellRendererParams } from "ag-grid-enterprise"
 import { Renderable, e, node_do_connected, node_do_disconnect } from "elt"
 
 
