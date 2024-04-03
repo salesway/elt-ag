@@ -5,24 +5,20 @@ import { Inserter, node_on_connected, node_on_disconnected, o, sym_insert, e, } 
 import "./grid-style"
 
 import { ModelSource } from "./server"
-import { Model } from "@salesway/pgts"
-import { ColumnMapping } from "./column-mapping"
+import { Model, } from "@salesway/pgts"
+import { ColumnMapping, } from "./column-mapping"
+import { GridEdits, } from "changes"
 
 
 export const sym_status = Symbol("modified")
-export const enum RowStatus {
-  None = 0,
-  Added = 1,
-  Modified = 2,
-  Deleted = 3,
-  Error = 4,
-}
 
 declare module "ag-grid-enterprise" {
-  interface IRowNode<TData = any> {
-    [sym_status]?: RowStatus
-    error?: string
+
+  interface GridApi<TData> {
+    idfn: (val: TData) => string
+    edits: GridEdits<TData>
   }
+
 }
 
 
@@ -30,12 +26,13 @@ declare module "ag-grid-enterprise" {
 export class AGWrapper<T, Context = any> implements Inserter<HTMLElement> {
 
   static from<T>(
-    typ: new () => T,
+    typ: typeof Model & (new () => T),
     id_fn: (item: T) => any,
     lst?: T[] | o.Observable<T[]>,
     opts?: GridOptions<T>
   ): AGWrapper<T> {
     const n = new AGWrapper<T>(id_fn)
+
     if (opts != null) { n.options(opts) }
     if (lst) n.data = o.get(lst)
     n.model = typ
@@ -43,14 +40,14 @@ export class AGWrapper<T, Context = any> implements Inserter<HTMLElement> {
   }
 
   node: HTMLDivElement = <div style={{width: "100%", height: "100%",}} class={["ag-theme-balham", "ag-theme-sw"]}/> as HTMLDivElement
-  table!: GridApi
-  model!: new () => T
+  table!: GridApi<T>
+  model!: typeof Model & (new () => T)
 
   _data: T[] | null = null
   get data(): T[] {
     const res: T[] = []
     this.table.forEachLeafNode(node => {
-      res.push(node.data)
+      res.push(node.data!)
     })
     return res
   }
@@ -64,13 +61,8 @@ export class AGWrapper<T, Context = any> implements Inserter<HTMLElement> {
     }
   }
 
-  modified_tmp = new Map<any, T>()
-  deleted_tmp = new Map<any, T>()
-
-  /**  */
-  saveChanges() {
-
-  }
+  nodes_to_update = new Map<any, T>()
+  nodes_to_delete = new Map<any, T>()
 
   constructor(
     public id_fn: (val: T) => any
@@ -93,21 +85,19 @@ export class AGWrapper<T, Context = any> implements Inserter<HTMLElement> {
 
     },
 
-    getRowStyle(par) {
-      if (par.node[sym_status] === RowStatus.Modified) {
-        return {background: "rgba(255, 165, 0, 0.25)"}
-      } else if (par.node[sym_status] === RowStatus.Error) {
-        return {background: "rgba(255, 0, 0, 0.25)"}
-      }
-    },
-
     enterNavigatesVerticallyAfterEdit: true,
-
     enableRangeSelection: true,
   }
 
   setQuickFilter(fil: string | undefined) {
     this.table?.setGridOption("quickFilterText", fil)
+  }
+
+  /** Call it after the first column */
+  setDraggableRows() {
+    this._cols[0].options({
+      rowDrag: true,
+    })
   }
 
   col<K extends keyof T>(key: K, fn?: (cm: ColumnMapping<T, K, Context>) => any) {
@@ -131,49 +121,20 @@ export class AGWrapper<T, Context = any> implements Inserter<HTMLElement> {
     return top
   }
 
-  /**
-   * Pour tous les objets Pinnés (en haut ou en bas,) on considère qu'il s'agit d'une tentative d'insertion, donc on tente de les "insérer," sachant qu'on va fail un objet pour lequel on avait par exemple déjà un row.
-   * Cela aboutit toujours à une transaction, sachant que l'on garde des changements locaux
-   */
-  async savePrimedChanges() {
-    let nodes_to_save: IRowNode<any>[] = []
-    let nodes_to_add: T[] = []
-
-    this.table.forEachLeafNode(node => {
-      if (node[sym_status]) {
-        nodes_to_save.push(node)
-      }
-    })
-
-    const row_id_fn = this.table.getGridOption("getRowId")!
-
-    // this.table.getRowNode()
-
-    // We should have a callback that does some validation, sets errors and replies with a batch update
-
-    console.log(nodes_to_save)
-
-    // ... after while
-    for (let n of nodes_to_save) {
-      n[sym_status] = RowStatus.None
-    }
-
-    await this.table.applyTransactionAsync({
-
-    })
-
-    this.table.redrawRows({
-      rowNodes: nodes_to_save
-    })
-  }
-
   on_connected = () => {
-    this.table = createGrid(this.node, {
+    const t = this.table = createGrid(this.node, {
       ...this._options,
-      columnDefs: this._cols.map(c => c._options),
     })
 
-    // this.table.addEventListener("cellEdi")
+    this.table.edits = new GridEdits(this)
+    t.setGridOption("columnDefs", [
+      ...t.edits?.getSelectionColumn(),
+      ...this._cols.map(c => c._options)
+    ])
+
+
+    // Upgrade the grid with stuff
+    t.idfn = this.id_fn
 
     if (this._data) {
       this.table.setGridOption("rowData", this._data)
@@ -189,13 +150,71 @@ export class AGWrapper<T, Context = any> implements Inserter<HTMLElement> {
   useServer<T extends Model>(this: AGWrapper<T, Context>, type = "serverSide" as "serverSide" | "infinite") {
     this.options({
       rowModelType: type,
-      serverSideDatasource: new ModelSource(this.model)
+      serverSideDatasource: new ModelSource(this.model as any)
     })
     return this
   }
 
+  addNewElement() {
+    const top = this.getTopPinnedObjects()
+    const row = new (this.model as any)()
+    top.unshift(row)
+    this.table.setGridOption("pinnedTopRowData", top)
+  }
+
   [sym_insert](parent: HTMLElement, ref: Node | null) {
+
+    this.node.addEventListener("keydown", ev => {
+      if (ev.ctrlKey && ev.altKey && ev.code === "Minus") {
+        this.markSelectionForDeletion()
+        ev.preventDefault()
+      } else if (ev.ctrlKey && ev.altKey && ev.code === "Equal") {
+        this.addNewElement()
+        const top = this.table.getPinnedTopRow(this.table.getPinnedTopRowCount() - 1)!
+        this.table.setFocusedCell(top.rowIndex!, this.table.getColumns()![0], "top")
+        ev.preventDefault()
+      } else if (ev.ctrlKey && ev.code === "Enter") {
+        // Multiple range entry, check if we are in edit mode ?
+      } else if (ev.ctrlKey && ev.code === "KeyZ") {
+        this.table.edits.undo()
+      } else if (ev.ctrlKey && ev.code === "KeyY") {
+        this.table.edits.redo()
+      }
+    })
     parent.insertBefore(this.node, ref)
   }
 
+  async save() {
+    return this.table.edits?.save()
+  }
+
+  /** Marque les rows qui ont des ranges comme étant à détruire */
+  markSelectionForDeletion() {
+    const ranges = this.table.getCellRanges()
+    if (ranges == null) return
+    const nodes: IRowNode[] = []
+    for (let rng of ranges) {
+      // Ignore pinned rows
+      if (rng.startRow == null || rng.endRow == null || rng.startRow.rowPinned != null || rng.endRow.rowPinned != null) { continue }
+
+      const [start, end] = [rng.startRow.rowIndex, rng.endRow.rowIndex]
+      for (let i = start; i <= end; i++) {
+        const node = this.table.getDisplayedRowAtIndex(i)
+        const data = node?.data
+        if (node == null || data == null) { continue }
+
+        nodes.push(node)
+      }
+      this.table.edits.delete(nodes)
+    }
+
+    this.table.redrawRows({rowNodes: nodes})
+
+    // Restore focus in the grid
+    for (let rng of ranges) {
+      if (rng.startRow == null) { continue }
+      this.table.setFocusedCell(rng.startRow.rowIndex, rng.columns[0], rng.startRow.rowPinned)
+      return
+    }
+  }
 }

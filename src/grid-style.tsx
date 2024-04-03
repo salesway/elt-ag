@@ -11,7 +11,7 @@ raw/* css */`
 
 .ag-theme-sw {
   font-size: 1rem;
-  --ag-grid-size: 2px;
+  --ag-grid-size: 3px;
   --ag-row-height: calc(1em + var(--ag-grid-size) * 3);
   --ag-header-height: calc(1em + var(--ag-grid-size) * 2);
   --ag-list-item-height: calc(1em + var(--ag-grid-size) * 2);

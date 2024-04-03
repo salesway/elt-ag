@@ -1,8 +1,9 @@
 import { Renderable, o } from "elt"
-import { ColDef, ICellEditorParams, ICellRendererParams, AgRichSelect, ModuleRegistry } from "ag-grid-enterprise"
+import { ColDef, ICellEditorParams, ICellRendererParams, ModuleRegistry } from "ag-grid-enterprise"
 
-import { sym_status, type AGWrapper } from "./grid"
+import { type AGWrapper } from "./grid"
 import { make_renderer } from "./elt-renderer"
+
 
 export type SelectValues<T, V, Context = any> = V[] | Promise<V[]> | ((params: ICellEditorParams<T, V, Context>) => V[] | Promise<V[]>)
 
@@ -66,7 +67,7 @@ export class ColumnMapping<T, K extends keyof T, Context = any> {
         filterList: true,
         highlightMatch: true,
         valueListGap: 0,
-        allowUserText: true,
+        allowUserText: false,
         ...opts,
       },
     })
@@ -108,19 +109,21 @@ export class ColumnMapping<T, K extends keyof T, Context = any> {
     // On fait en sorte que toute modification reste bien immutable.
     valueSetter: (param) => {
       if (param.node && param.newValue !== param.oldValue) {
-        const dt = o.assign(
-          param.data as any,
+
+        const current = param.data
+        //
+        const value = o.assign(
+          current as any,
           {[param.colDef.field!]: param.newValue}
         ) as T
 
         const node = param.node
-        node[sym_status] = 1
-        node.setData(dt)
 
-        const id = this.wrapper.id_fn(dt)
-        if (node.id !== id) {
-          // param.node.Id
+        if (!node.isRowPinned()) {
+          param.api.edits.update([{ value, node }])
         }
+        node.setData(value)
+
         // Il faut probablement faire un SetId !
         return true
       }
