@@ -1,5 +1,5 @@
 import { Model, s } from "@salesway/pgts"
-import { ColDef, GridApi, IRowNode } from "ag-grid-enterprise"
+import { ColDef, GridApi, IRowNode, PinnedRowDataChangedEvent } from "ag-grid-enterprise"
 import { Renderable, o, e } from "elt"
 import { make_renderer } from "elt-renderer"
 import type { AGWrapper } from "grid"
@@ -8,6 +8,9 @@ import { raw } from "osun"
 
 import * as I from "elt-fa/sharp-light"
 import { $tooltip } from "elt-shoelace"
+
+const Top = Symbol("top")
+const Bottom = Symbol("bottom")
 
 
 export const enum Op {
@@ -37,6 +40,10 @@ export class EditStack<T> extends Map<string | IRowNode<T>, Status<T>> {
     super(iter)
   }
 
+  //
+  top?: Set<IRowNode<T>>
+  bottom?: Set<IRowNode<T>>
+
   derive() {
     if (this.next) {
       this.next.prev = null
@@ -63,7 +70,7 @@ export class GridEdits<T = any> {
   constructor(
     public wrapper: AGWrapper<T>,
   ) {
-    this.grid = this.wrapper.table
+    this.grid = this.wrapper.grid
     this.init()
   }
 
@@ -77,13 +84,52 @@ export class GridEdits<T = any> {
   o_undo_nb = o(0)
   o_redo_nb = o(0)
 
+  pinned_lock = o.exclusive_lock()
+
   /** Register a few events on the grid to clear ourselves if too many things happened, such as a server refresh */
   init() {
     this.setupChangeReporting()
+
+    this.grid.addEventListener("pinnedRowDataChanged", (ev: PinnedRowDataChangedEvent<T>) => {
+      this.pinned_lock(() => {
+        console.log("changed")
+      })
+    })
     // this.grid.addEventListener("")
   }
 
+  createStagingRow(pos: "top" | "bottom" = "top") {
+    const grid = this.grid
+    const newelt = new (this.wrapper.model as any)() as T
+  }
+
+  /** Get the top pinned rows */
+  protected getPinnedRows(where: "top" | "bottom" = "top") {
+    const grid = this.grid
+    const cnt = where === "top" ? grid.getPinnedTopRowCount() : grid.getPinnedBottomRowCount()
+    const nodes: IRowNode<T>[] = []
+    for (let i = 0; i < cnt; i++) {
+      nodes.push(where === "top" ? grid.getPinnedTopRow(i)! : grid.getPinnedBottomRow(i)!)
+    }
+    return nodes
+  }
+
+  protected nodeId(node: IRowNode<T>) {
+    return node.id ?? node
+  }
+
+  /** Temps en ms en dessous duquel deux modifications successives sont considérées comme faisant partie d'un même jeu de modifications */
+  BATCH_MS_THRESHOLD = 20
+  /** Timestamp de la dernière demande de jeu de modification */
+  last_push = 0
+  /**  */
   pushState(): {current: EditStack<T>, prev: EditStack<T>} {
+    const last_push = Date.now()
+    const diff = last_push - this.last_push
+    this.last_push = last_push
+    if (diff <= this.BATCH_MS_THRESHOLD && this.current_status.prev) {
+      return {current: this.current_status, prev: this.current_status.prev}
+    }
     const prev = this.current_status
     const current = this.current_status.derive()
     this.current_status = current
@@ -91,6 +137,29 @@ export class GridEdits<T = any> {
       this.first = this.first.unshift()
     }
     return {current, prev}
+  }
+
+  setupContextMenu() {
+    this.grid.setGridOption("getContextMenuItems", param => {
+      console.log("?????")
+      return [
+        {
+          icon: <I.FaArrowRotateRight>
+            {$tooltip(() => "Yup.")}
+          </I.FaArrowRotateRight> as Element,
+          name: "Rafraîchir",
+          tooltip: "Rafraîchit la valeur depuis le serveur",
+        },
+        {
+          icon: <I.FaTrash/> as Element,
+          name: "Supprimer",
+          tooltip: "Marque le row à supprimer",
+          action: () => {
+
+          }
+        }
+      ]
+    })
   }
 
   setupChangeReporting() {
@@ -104,7 +173,7 @@ export class GridEdits<T = any> {
         : []
 
       const node = par.node
-      const st = chg.get(node.id ?? node)
+      const st = chg.get(this.nodeId(node))
       if (st == null) {
         return [""]
       }
@@ -138,30 +207,10 @@ export class GridEdits<T = any> {
         floatingFilter: false,
         suppressHeaderMenuButton: true,
 
-        contextMenuItems: par => {
-          return [
-            {
-              icon: <I.FaArrowRotateRight>
-                {$tooltip(() => "Yup.")}
-              </I.FaArrowRotateRight> as Element,
-              name: "Rafraîchir",
-              tooltip: "Rafraîchit la valeur depuis le serveur",
-            },
-            {
-              icon: <I.FaTrash/> as Element,
-              name: "Supprimer",
-              tooltip: "Marque le row à supprimer",
-              action: () => {
-
-              }
-            }
-          ]
-        },
-
         /** Render des indicateurs d'erreur / modification / suppression */
         cellRenderer: make_renderer(par => {
-          const st = this.current_status.get(par.node.id ?? par.node as any)
-          let display = <span></span> as HTMLElement
+          const st = this.current_status.get(this.nodeId(par.node as any))
+          let display = <span style={{fontSize: "0.8em"}}>&zwnj;</span> as HTMLElement
 
           if (st?.errors) {
             e(display, $tooltip(st.errors), <I.FaTriangleExclamation/>)
@@ -184,19 +233,15 @@ export class GridEdits<T = any> {
     ]
   }
 
-  // create(data: {node: IRowNode<T>, value: T}[]) {
-  //   const {current, prev} = this.pushState()
-
-  //   for (let d of data) {
-  //     const n = d.node
-  //   }
-  // }
+  add(top: boolean) {
+    // const data = top ? this.getPinnedRows()
+  }
 
   update(data: {node: IRowNode<T>, value: T,}[]) {
     const {current, prev} = this.pushState()
 
     for (let {node, value} of data) {
-      const id = node.id ?? node
+      const id = this.nodeId(node)
       if (!prev.has(id)) {
         prev.set(id, new Status(
           node,
@@ -216,9 +261,11 @@ export class GridEdits<T = any> {
     const {prev, current} = this.pushState()
 
     for (let n of nodes) {
-      const id = n.id
+      const id = this.nodeId(n)
+
       // If id is null, we should check whether we're trying to delete a pinned row (which is a creation row)
-      if (id == null || n.data == null) continue
+      if (n.rowPinned) { continue }
+      if (n.data == null) { continue }
 
       const _old_status = prev.get(id)
 

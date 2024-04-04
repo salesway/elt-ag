@@ -40,22 +40,22 @@ export class AGWrapper<T, Context = any> implements Inserter<HTMLElement> {
   }
 
   node: HTMLDivElement = <div style={{width: "100%", height: "100%",}} class={["ag-theme-balham", "ag-theme-sw"]}/> as HTMLDivElement
-  table!: GridApi<T>
+  grid!: GridApi<T>
   model!: typeof Model & (new () => T)
 
   _data: T[] | null = null
   get data(): T[] {
     const res: T[] = []
-    this.table.forEachLeafNode(node => {
+    this.grid.forEachLeafNode(node => {
       res.push(node.data!)
     })
     return res
   }
   set data(dt: T[]) {
-    if (!this.table) {
+    if (!this.grid) {
       this._data = dt
     } else {
-      this.table.updateGridOptions({
+      this.grid.updateGridOptions({
         rowData: dt,
       })
     }
@@ -90,7 +90,7 @@ export class AGWrapper<T, Context = any> implements Inserter<HTMLElement> {
   }
 
   setQuickFilter(fil: string | undefined) {
-    this.table?.setGridOption("quickFilterText", fil)
+    this.grid?.setGridOption("quickFilterText", fil)
   }
 
   /** Call it after the first column */
@@ -113,20 +113,20 @@ export class AGWrapper<T, Context = any> implements Inserter<HTMLElement> {
   }
 
   getTopPinnedObjects(): T[] {
-    const nb_top = this.table.getPinnedTopRowCount()
+    const nb_top = this.grid.getPinnedTopRowCount()
     const top: T[] = []
     for (let i = 0; i < nb_top; i++) {
-      top.push(this.table.getPinnedTopRow(i)?.data)
+      top.push(this.grid.getPinnedTopRow(i)?.data)
     }
     return top
   }
 
   on_connected = () => {
-    const t = this.table = createGrid(this.node, {
+    const t = this.grid = createGrid(this.node, {
       ...this._options,
     })
 
-    this.table.edits = new GridEdits(this)
+    this.grid.edits = new GridEdits(this)
     t.setGridOption("columnDefs", [
       ...t.edits?.getSelectionColumn(),
       ...this._cols.map(c => c._options)
@@ -137,14 +137,14 @@ export class AGWrapper<T, Context = any> implements Inserter<HTMLElement> {
     t.idfn = this.id_fn
 
     if (this._data) {
-      this.table.setGridOption("rowData", this._data)
+      this.grid.setGridOption("rowData", this._data)
       this._data = null
     }
   }
 
   on_disconnected = () => {
-    this.table.destroy()
-    this.table = null!
+    this.grid.destroy()
+    this.grid = null!
   }
 
   useServer<T extends Model>(this: AGWrapper<T, Context>, type = "serverSide" as "serverSide" | "infinite") {
@@ -159,28 +159,26 @@ export class AGWrapper<T, Context = any> implements Inserter<HTMLElement> {
     const top = this.getTopPinnedObjects()
     const row = new (this.model as any)()
     top.unshift(row)
-    this.table.setGridOption("pinnedTopRowData", top)
+    this.grid.setGridOption("pinnedTopRowData", top)
   }
 
   [sym_insert](parent: HTMLElement, ref: Node | null) {
 
     this.node.addEventListener("keydown", ev => {
-      if (ev.ctrlKey && ev.altKey && ev.code === "Minus") {
-        this.markSelectionForDeletion()
-        ev.preventDefault()
-      } else if (ev.ctrlKey && ev.altKey && ev.code === "Equal") {
+      if (ev.ctrlKey && ev.code === "Equal") {
         this.addNewElement()
-        const top = this.table.getPinnedTopRow(this.table.getPinnedTopRowCount() - 1)!
-        this.table.setFocusedCell(top.rowIndex!, this.table.getColumns()![0], "top")
-        ev.preventDefault()
+        const top = this.grid.getPinnedTopRow(this.grid.getPinnedTopRowCount() - 1)!
+        this.grid.setFocusedCell(top.rowIndex!, this.grid.getColumns()![0], "top")
+      } else if (ev.ctrlKey && (ev.code === "Minus" || ev.code === "Delete")) {
+        this.markSelectionForDeletion()
       } else if (ev.ctrlKey && ev.code === "Enter") {
         // Multiple range entry, check if we are in edit mode ?
       } else if (ev.ctrlKey && ev.code === "KeyZ") {
-        this.table.edits.undo()
+        this.grid.edits.undo()
       } else if (ev.ctrlKey && ev.code === "KeyY") {
-        this.table.edits.redo()
+        this.grid.edits.redo()
       } else if (ev.ctrlKey && ev.code === "KeyA") {
-        const grid = this.table
+        const grid = this.grid
         const cols = grid.getColumns()!.slice(1)
 
         grid.clearRangeSelection()
@@ -191,7 +189,6 @@ export class AGWrapper<T, Context = any> implements Inserter<HTMLElement> {
           columns: cols,
           rowEndIndex: grid.getDisplayedRowCount()
         })
-
         // this.table.
       } else {
         return
@@ -203,12 +200,12 @@ export class AGWrapper<T, Context = any> implements Inserter<HTMLElement> {
   }
 
   async save() {
-    return this.table.edits?.save()
+    return this.grid.edits?.save()
   }
 
   /** Marque les rows qui ont des ranges comme étant à détruire */
   markSelectionForDeletion() {
-    const ranges = this.table.getCellRanges()
+    const ranges = this.grid.getCellRanges()
     if (ranges == null) return
     const nodes: IRowNode[] = []
     for (let rng of ranges) {
@@ -217,21 +214,21 @@ export class AGWrapper<T, Context = any> implements Inserter<HTMLElement> {
 
       const [start, end] = [rng.startRow.rowIndex, rng.endRow.rowIndex]
       for (let i = start; i <= end; i++) {
-        const node = this.table.getDisplayedRowAtIndex(i)
+        const node = this.grid.getDisplayedRowAtIndex(i)
         const data = node?.data
         if (node == null || data == null) { continue }
 
         nodes.push(node)
       }
-      this.table.edits.delete(nodes)
+      this.grid.edits.delete(nodes)
     }
 
-    this.table.redrawRows({rowNodes: nodes})
+    this.grid.redrawRows({rowNodes: nodes})
 
     // Restore focus in the grid
     for (let rng of ranges) {
       if (rng.startRow == null) { continue }
-      this.table.setFocusedCell(rng.startRow.rowIndex, rng.columns[0], rng.startRow.rowPinned)
+      this.grid.setFocusedCell(rng.startRow.rowIndex, rng.columns[0], rng.startRow.rowPinned)
       return
     }
   }
